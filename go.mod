@@ -1,4 +1,4 @@
-module github.com/drajshek/k8s-mutators
+module github.com/drajshek/k8-ingress-mutator
 
 go 1.15
 
