@@ -1,4 +1,4 @@
-module github.com/drajshek/k8s-ingress-mutator
+module github.com/drajshek/k8s-httpproxy-mutator
 
 go 1.15
 
