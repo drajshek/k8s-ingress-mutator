@@ -33,7 +33,8 @@ func Mutate(pluginName string, log logrus.FieldLogger, ingress core.Ingress, dom
 		},
 		ObjectMeta: v1.ObjectMeta{
 
-			Name: ingress.ObjectMeta.Name,
+			Name:        ingress.ObjectMeta.Name,
+			Annotations: httpannotations,
 		},
 		Spec: contourv1.HTTPProxySpec{
 
