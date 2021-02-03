@@ -1,6 +1,8 @@
 package ingress2httpproxy
 
 import (
+	"strings"
+
 	contourv1 "github.com/projectcontour/contour/apis/projectcontour/v1"
 	"github.com/sirupsen/logrus"
 	core "k8s.io/api/networking/v1beta1"
@@ -12,17 +14,18 @@ var service = contourv1.Service{}
 var route = contourv1.Route{
 	Conditions: []contourv1.MatchCondition{},
 }
-
+var annotation map[string]string
 var routefinal = contourv1.Route{
 	Conditions: []contourv1.MatchCondition{},
 }
+var httpannotations = make(map[string]string)
 
 //Mutate func recevies the plugin name, logger and ingress definition and returns the contour httpproxy
-func Mutate(pluginName string, log logrus.FieldLogger, ingress core.Ingress) contourv1.HTTPProxy {
-
+func Mutate(pluginName string, log logrus.FieldLogger, ingress core.Ingress, domain string) contourv1.HTTPProxy {
+	var httpproxyFqdn string
 	// Meta data section start
 	// Call the translateRoutes function to parse the rules section of ingress
-	hpTranslatedRoute := translateRoutes(ingress.Spec.Rules)
+	hpTranslatedRoute := translateRoutes(ingress.Spec.Rules, log)
 	hp := contourv1.HTTPProxy{
 		TypeMeta: v1.TypeMeta{
 			Kind:       "HTTPProxy",
@@ -37,10 +40,27 @@ func Mutate(pluginName string, log logrus.FieldLogger, ingress core.Ingress) con
 			Routes: hpTranslatedRoute,
 		},
 	}
-	//Assigning the fqdn
-	httpproxyFqdn := ingress.Spec.Rules[0].Host
+	//Set up the wildcard DNS.
+	log.Infof("%s", "%s", "Domain Received", domain)
+	if domain != "" {
+		normalizedDomain := domain
+		// let's accept the domain starting with "*." or "."
+		if domain[0:2] == "*." {
+			normalizedDomain = domain[2:]
+		} else if domain[0:1] == "." {
+			normalizedDomain = domain[1:]
+		}
+		ocpRouteSplit := strings.SplitN(domain, ".", 2)
+		httpproxyFqdn = ocpRouteSplit[0] + "." + normalizedDomain
 
-	//extract the Prefix of OCP route
+	} else {
+		// user did not specify the new wild card DNS
+		httpproxyFqdn = ingress.Spec.Rules[0].Host
+		log.Warnf("[%s] No new wildcard DNS domain specified. This mutation will use original domain from OCP route %s.", pluginName, httpproxyFqdn)
+
+	}
+
+	//Assign the FQDN
 	hp.Spec.VirtualHost = &contourv1.VirtualHost{
 		Fqdn: httpproxyFqdn,
 	}
@@ -53,17 +73,32 @@ func Mutate(pluginName string, log logrus.FieldLogger, ingress core.Ingress) con
 }
 
 //Loop through the rules section and http paths
-func translateRoutes(inrules []core.IngressRule) []contourv1.Route {
+func translateRoutes(inrules []core.IngressRule, log logrus.FieldLogger) []contourv1.Route {
 	var routes []contourv1.Route
-	for _, inrule := range inrules {
+	var unsupportedhosts string
+	for i, inrule := range inrules {
 
-		for i, ipaths := range inrule.HTTP.Paths {
+		//var service1 = contourv1.Service{}
 
-			_ = translateService(ipaths.Backend, ipaths.Path, i)
-			routes = append(routes, routefinal)
+		if i >= 1 {
+
+			unsupportedhosts += inrule.Host + ","
+			log.Warnf("%s", "%s", "Unsupported host", inrule.Host)
+
+		} else {
+
+			httpannotations["ingress-2-httpproxy/supported-hosts"] = inrule.Host
+			log.Infof("%s", "%s", "Supported host", inrule.Host)
+			for i, ipaths := range inrule.HTTP.Paths {
+
+				//fmt.Println("looping")
+				_ = translateService(ipaths.Backend, ipaths.Path, i)
+				routes = append(routes, routefinal)
+			}
 		}
 
 	}
+	httpannotations["ingress-2-httpproxy/unsupported-hosts"] = strings.TrimRight(unsupportedhosts, ",")
 	return routes
 }
 
