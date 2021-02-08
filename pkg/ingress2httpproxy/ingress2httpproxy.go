@@ -17,7 +17,7 @@ const (
 
 // MutatorOutput contains the mutated output structures
 type MutatorOutput struct {
-	httpProxy contourv1.HTTPProxy
+	HTTPProxy contourv1.HTTPProxy
 }
 
 // Mutator contains common atttributes and the mutation input source structure
@@ -42,7 +42,7 @@ func NewMutator(name string, log logrus.FieldLogger, ingress core.Ingress, domai
 //Mutate converts a Ingress into HTTPProxy
 func (m *Mutator) Mutate() *MutatorOutput {
 	return &MutatorOutput{
-		httpProxy: m.buildHTTPProxy(),
+		HTTPProxy: m.buildHTTPProxy(),
 	}
 
 }
