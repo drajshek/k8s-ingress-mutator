@@ -54,7 +54,7 @@ func (m *Mutator) buildHTTPProxy() contourv1.HTTPProxy {
 	// Call the translateRoutes function to parse the rules section of ingress
 
 	var httpAnnotations = make(map[string]string)
-	hpTranslatedRoute := translateRoutes(ingress.Spec.Rules, log, &httpAnnotations)
+	hpTranslatedRoute := translateRoutes(m.input.Spec.Rules, m.log, &httpAnnotations)
 	hp := contourv1.HTTPProxy{
 		TypeMeta: v1.TypeMeta{
 			Kind:       "HTTPProxy",
@@ -62,7 +62,7 @@ func (m *Mutator) buildHTTPProxy() contourv1.HTTPProxy {
 		},
 		ObjectMeta: v1.ObjectMeta{
 
-			Name:        ingress.ObjectMeta.Name,
+			Name:        m.input.ObjectMeta.Name,
 			Annotations: httpAnnotations,
 		},
 		Spec: contourv1.HTTPProxySpec{
@@ -71,22 +71,22 @@ func (m *Mutator) buildHTTPProxy() contourv1.HTTPProxy {
 		},
 	}
 	//Set up the wildcard DNS.
-	log.Infof("%s", "%s", "Domain Received", domain)
-	if domain != "" {
-		normalizedDomain := domain
+	log.Infof("%s", "%s", "Domain Received", m.domain)
+	if m.domain != "" {
+		normalizedDomain := m.domain
 		// let's accept the domain starting with "*." or "."
-		if domain[0:2] == "*." {
-			normalizedDomain = domain[2:]
-		} else if domain[0:1] == "." {
-			normalizedDomain = domain[1:]
+		if m.domain[0:2] == "*." {
+			normalizedDomain = m.domain[2:]
+		} else if m.domain[0:1] == "." {
+			normalizedDomain = m.domain[1:]
 		}
-		ocpRouteSplit := strings.SplitN(domain, ".", 2)
+		ocpRouteSplit := strings.SplitN(m.domain, ".", 2)
 		httpproxyFqdn = ocpRouteSplit[0] + "." + normalizedDomain
 
 	} else {
 		// user did not specify the new wild card DNS
-		httpproxyFqdn = ingress.Spec.Rules[0].Host
-		log.Warnf("[%s] No new wildcard DNS domain specified. This mutation will use original domain from OCP route %s.", pluginName, httpproxyFqdn)
+		httpproxyFqdn = m.input.Spec.Rules[0].Host
+		log.Warnf("[%s] No new wildcard DNS domain specified. This mutation will use original domain from OCP route %s.", m.name, httpproxyFqdn)
 
 	}
 
@@ -96,7 +96,7 @@ func (m *Mutator) buildHTTPProxy() contourv1.HTTPProxy {
 	}
 	//Assign the secret name
 	hp.Spec.VirtualHost.TLS = &contourv1.TLS{}
-	hp.Spec.VirtualHost.TLS.SecretName = ingress.Spec.TLS[0].SecretName
+	hp.Spec.VirtualHost.TLS.SecretName = m.input.Spec.TLS[0].SecretName
 
 	return hp
 
