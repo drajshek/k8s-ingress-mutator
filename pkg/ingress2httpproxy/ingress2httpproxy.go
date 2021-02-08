@@ -9,23 +9,19 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-var ingress = core.Ingress{}
-var service = contourv1.Service{}
-var route = contourv1.Route{
-	Conditions: []contourv1.MatchCondition{},
-}
-var annotation map[string]string
-var routefinal = contourv1.Route{
-	Conditions: []contourv1.MatchCondition{},
-}
-var httpannotations = make(map[string]string)
+const (
+	supportedHosts   = "ingress-2-httpproxy/supported-hosts"
+	unSupportedHosts = "ingress-2-httpproxy/unsupported-hosts"
+)
 
 //Mutate func recevies the plugin name, logger and ingress definition and returns the contour httpproxy
 func Mutate(pluginName string, log logrus.FieldLogger, ingress core.Ingress, domain string) contourv1.HTTPProxy {
 	var httpproxyFqdn string
 	// Meta data section start
 	// Call the translateRoutes function to parse the rules section of ingress
-	hpTranslatedRoute := translateRoutes(ingress.Spec.Rules, log)
+
+	var httpAnnotations = make(map[string]string)
+	hpTranslatedRoute := translateRoutes(ingress.Spec.Rules, log, &httpAnnotations)
 	hp := contourv1.HTTPProxy{
 		TypeMeta: v1.TypeMeta{
 			Kind:       "HTTPProxy",
@@ -34,7 +30,7 @@ func Mutate(pluginName string, log logrus.FieldLogger, ingress core.Ingress, dom
 		ObjectMeta: v1.ObjectMeta{
 
 			Name:        ingress.ObjectMeta.Name,
-			Annotations: httpannotations,
+			Annotations: httpAnnotations,
 		},
 		Spec: contourv1.HTTPProxySpec{
 
@@ -74,32 +70,42 @@ func Mutate(pluginName string, log logrus.FieldLogger, ingress core.Ingress, dom
 }
 
 //Loop through the rules section and http paths
-func translateRoutes(inrules []core.IngressRule, log logrus.FieldLogger) []contourv1.Route {
+func translateRoutes(inrules []core.IngressRule, log logrus.FieldLogger, httpAnnotations *map[string]string) []contourv1.Route {
 	var routes []contourv1.Route
-	var unsupportedhosts string
+	var unsupportedHosts string
+	var annotations = make(map[string]string)
+	var route = contourv1.Route{
+		Conditions: []contourv1.MatchCondition{},
+	}
+	var routefinal = contourv1.Route{
+		Conditions: []contourv1.MatchCondition{},
+	}
 	for i, inrule := range inrules {
 
 		//var service1 = contourv1.Service{}
 
 		if i >= 1 {
 
-			unsupportedhosts += inrule.Host + ","
+			unsupportedHosts += inrule.Host + ","
 			log.Warnf("%s", "%s", "Unsupported host", inrule.Host)
 
 		} else {
 
-			httpannotations["ingress-2-httpproxy/supported-hosts"] = inrule.Host
+			annotations[supportedHosts] = inrule.Host
 			log.Infof("%s", "%s", "Supported host", inrule.Host)
-			for i, ipaths := range inrule.HTTP.Paths {
+			for _, ipaths := range inrule.HTTP.Paths {
 
 				//fmt.Println("looping")
-				_ = translateService(ipaths.Backend, ipaths.Path, i)
+				service, condition := translateService(ipaths.Backend, ipaths.Path)
+				routefinal.Conditions = append(route.Conditions, condition)
+				routefinal.Services = append(route.Services, service)
 				routes = append(routes, routefinal)
 			}
 		}
 
 	}
-	httpannotations["ingress-2-httpproxy/unsupported-hosts"] = strings.TrimRight(unsupportedhosts, ",")
+	annotations[unSupportedHosts] = strings.TrimRight(unsupportedHosts, ",")
+	*httpAnnotations = annotations
 	return routes
 }
 
@@ -112,18 +118,15 @@ func translateRoutes(inrules []core.IngressRule, log logrus.FieldLogger) []conto
 // }
 
 //create the route object and return to the translaterules function
-func translateService(backend core.IngressBackend, prefix string, i int) contourv1.Service {
+func translateService(backend core.IngressBackend, prefix string) (contourv1.Service, contourv1.MatchCondition) {
 
 	condition := contourv1.MatchCondition{}
 	condition.Prefix = prefix
-
-	routefinal.Conditions = append(route.Conditions, condition)
 
 	service := contourv1.Service{
 		Name: backend.ServiceName,
 		Port: backend.ServicePort.IntValue(),
 	}
-	routefinal.Services = append(route.Services, service)
 
-	return service
+	return service, condition
 }
