@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	contourv1 "github.com/projectcontour/contour/apis/projectcontour/v1"
+	"github.com/prometheus/common/log"
 	"github.com/sirupsen/logrus"
 	core "k8s.io/api/networking/v1beta1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -14,8 +15,40 @@ const (
 	unSupportedHosts = "ingress-2-httpproxy/unsupported-hosts"
 )
 
-//Mutate func recevies the plugin name, logger and ingress definition and returns the contour httpproxy
-func Mutate(pluginName string, log logrus.FieldLogger, ingress core.Ingress, domain string) contourv1.HTTPProxy {
+// MutatorOutput contains the mutated output structures
+type MutatorOutput struct {
+	httpProxy contourv1.HTTPProxy
+}
+
+// Mutator contains common atttributes and the mutation input source structure
+type Mutator struct {
+	name   string
+	log    logrus.FieldLogger
+	input  core.Ingress
+	domain string
+}
+
+// NewMutator creates a new Mutator. Clients of this API should set a meaningful name that can be used
+// to easily identify the calling client.
+func NewMutator(name string, log logrus.FieldLogger, ingress core.Ingress, domain string) Mutator {
+	return Mutator{
+		name:   name,
+		log:    log,
+		input:  ingress,
+		domain: domain,
+	}
+}
+
+//Mutate converts a Ingress into HTTPProxy
+func (m *Mutator) Mutate() *MutatorOutput {
+	return &MutatorOutput{
+		httpProxy: m.buildHTTPProxy(),
+	}
+
+}
+
+//Builds and returns the contour httpproxy
+func (m *Mutator) buildHTTPProxy() contourv1.HTTPProxy {
 	var httpproxyFqdn string
 	// Meta data section start
 	// Call the translateRoutes function to parse the rules section of ingress
@@ -108,14 +141,6 @@ func translateRoutes(inrules []core.IngressRule, log logrus.FieldLogger, httpAnn
 	*httpAnnotations = annotations
 	return routes
 }
-
-// func translaterule(inrule core.IngressRule) contourv1.Route {
-
-// 	//fmt.Println(inrule.HTTP.Paths[0].Backend.ServiceName)
-
-// 	return route
-
-// }
 
 //create the route object and return to the translaterules function
 func translateService(backend core.IngressBackend, prefix string) (contourv1.Service, contourv1.MatchCondition) {
