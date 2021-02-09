@@ -49,11 +49,10 @@ func (m *Mutator) Mutate() *MutatorOutput {
 
 //Builds and returns the contour httpproxy
 func (m *Mutator) buildHTTPProxy() contourv1.HTTPProxy {
-	var httpproxyFqdn string
+	var httpProxyFqdn string
+	var httpAnnotations = make(map[string]string)
 	// Meta data section start
 	// Call the translateRoutes function to parse the rules section of ingress
-
-	var httpAnnotations = make(map[string]string)
 	hpTranslatedRoute := translateRoutes(m.input.Spec.Rules, m.log, &httpAnnotations)
 	hp := contourv1.HTTPProxy{
 		TypeMeta: v1.TypeMeta{
@@ -70,8 +69,6 @@ func (m *Mutator) buildHTTPProxy() contourv1.HTTPProxy {
 			Routes: hpTranslatedRoute,
 		},
 	}
-	//Set up the wildcard DNS.
-	log.Infof("%s", "%s", "Domain Received", m.domain)
 	if m.domain != "" {
 		normalizedDomain := m.domain
 		// let's accept the domain starting with "*." or "."
@@ -81,28 +78,28 @@ func (m *Mutator) buildHTTPProxy() contourv1.HTTPProxy {
 			normalizedDomain = m.domain[1:]
 		}
 		ocpRouteSplit := strings.SplitN(m.domain, ".", 2)
-		httpproxyFqdn = ocpRouteSplit[0] + "." + normalizedDomain
+		httpProxyFqdn = ocpRouteSplit[0] + "." + normalizedDomain
 
 	} else {
 		// user did not specify the new wild card DNS
-		httpproxyFqdn = m.input.Spec.Rules[0].Host
-		log.Warnf("[%s] No new wildcard DNS domain specified. This mutation will use original domain from OCP route %s.", m.name, httpproxyFqdn)
+		httpProxyFqdn = m.input.Spec.Rules[0].Host
+		log.Warnf("[%s] No new wildcard DNS domain specified. This mutation will use original domain from OCP route %s.", m.name, httpProxyFqdn)
 
 	}
 
 	//Assign the FQDN
 	hp.Spec.VirtualHost = &contourv1.VirtualHost{
-		Fqdn: httpproxyFqdn,
+		Fqdn: httpProxyFqdn,
 	}
 	//Assign the secret name
 	hp.Spec.VirtualHost.TLS = &contourv1.TLS{}
 	hp.Spec.VirtualHost.TLS.SecretName = m.input.Spec.TLS[0].SecretName
-
+	//Return the HTTPProxy Object
 	return hp
 
 }
 
-//Loop through the rules section and http paths
+//Loop through the rules section and http paths and create the route object.
 func translateRoutes(inrules []core.IngressRule, log logrus.FieldLogger, httpAnnotations *map[string]string) []contourv1.Route {
 	var routes []contourv1.Route
 	var unsupportedHosts string
@@ -110,12 +107,10 @@ func translateRoutes(inrules []core.IngressRule, log logrus.FieldLogger, httpAnn
 	var route = contourv1.Route{
 		Conditions: []contourv1.MatchCondition{},
 	}
-	var routefinal = contourv1.Route{
+	var routeFinal = contourv1.Route{
 		Conditions: []contourv1.MatchCondition{},
 	}
 	for i, inrule := range inrules {
-
-		//var service1 = contourv1.Service{}
 
 		if i >= 1 {
 
@@ -128,11 +123,10 @@ func translateRoutes(inrules []core.IngressRule, log logrus.FieldLogger, httpAnn
 			log.Infof("%s", "%s", "Supported host", inrule.Host)
 			for _, ipaths := range inrule.HTTP.Paths {
 
-				//fmt.Println("looping")
 				service, condition := translateService(ipaths.Backend, ipaths.Path)
-				routefinal.Conditions = append(route.Conditions, condition)
-				routefinal.Services = append(route.Services, service)
-				routes = append(routes, routefinal)
+				routeFinal.Conditions = append(route.Conditions, condition)
+				routeFinal.Services = append(route.Services, service)
+				routes = append(routes, routeFinal)
 			}
 		}
 
@@ -142,7 +136,7 @@ func translateRoutes(inrules []core.IngressRule, log logrus.FieldLogger, httpAnn
 	return routes
 }
 
-//create the route object and return to the translaterules function
+//create the service , condition object and return
 func translateService(backend core.IngressBackend, prefix string) (contourv1.Service, contourv1.MatchCondition) {
 
 	condition := contourv1.MatchCondition{}
