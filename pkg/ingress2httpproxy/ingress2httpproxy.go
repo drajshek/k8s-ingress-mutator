@@ -75,7 +75,8 @@ func (m *Mutator) buildHTTPProxy() contourv1.HTTPProxy {
 			normalizedDomain = m.domain[1:]
 		}
 		ingressHostSplit := strings.SplitN(m.domain, ".", 2)
-		httpProxyFqdn = ingressHostSplit[0] + "." + normalizedDomain
+		prefix := strings.SplitN(m.input.Spec.Rules[0].Host, ".", 2)
+		httpProxyFqdn = prefix[0] + ingressHostSplit[0] + "." + normalizedDomain
 	}
 	hp.Spec.VirtualHost = &contourv1.VirtualHost{
 		Fqdn: httpProxyFqdn,
