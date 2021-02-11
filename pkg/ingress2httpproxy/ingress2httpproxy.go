@@ -85,7 +85,7 @@ func (m *Mutator) buildHTTPProxy() contourv1.HTTPProxy {
 	return hp
 }
 
-// CreateRoute creates the route object which includes condition and service details
+// createRoute creates the route object which includes condition and service details
 func (m *Mutator) createRoute(inrules []core.IngressRule, log logrus.FieldLogger, httpAnnotations map[string]string) ([]contourv1.Route, map[string]string) {
 	var routes []contourv1.Route
 	var route = contourv1.Route{
