@@ -11,8 +11,7 @@ import (
 )
 
 const (
-	supportedHosts   = "ingress-2-httpproxy/supported-hosts"
-	unSupportedHosts = "ingress-2-httpproxy/unsupported-hosts"
+	unSupportedHosts = "unsupported-hosts"
 )
 
 // MutatorOutput contains the mutated output structures
@@ -39,36 +38,34 @@ func NewMutator(name string, log logrus.FieldLogger, ingress core.Ingress, domai
 	}
 }
 
-//Mutate converts a Ingress into HTTPProxy
+// Mutate converts a Ingress into HTTPProxy
 func (m *Mutator) Mutate() *MutatorOutput {
 	return &MutatorOutput{
 		HTTPProxy: m.buildHTTPProxy(),
 	}
-
 }
 
-//Builds and returns the contour httpproxy
+// buildHTTPProxy takes ingress object as an input and returns  Contour HTTPProxy
 func (m *Mutator) buildHTTPProxy() contourv1.HTTPProxy {
 	var httpProxyFqdn string
 	var httpAnnotations = make(map[string]string)
-	// Meta data section start
-	// Call the translateRoutes function to parse the rules section of ingress
-	hpTranslatedRoute := translateRoutes(m.input.Spec.Rules, m.log, &httpAnnotations)
+	hpTranslatedRoute, httpAnnotations := m.createRoute(m.input.Spec.Rules, m.log, httpAnnotations)
 	hp := contourv1.HTTPProxy{
 		TypeMeta: v1.TypeMeta{
 			Kind:       "HTTPProxy",
 			APIVersion: "projectcontour.io/v1",
 		},
 		ObjectMeta: v1.ObjectMeta{
-
 			Name:        m.input.ObjectMeta.Name,
 			Annotations: httpAnnotations,
+			Namespace:   m.input.ObjectMeta.Namespace,
 		},
 		Spec: contourv1.HTTPProxySpec{
-
 			Routes: hpTranslatedRoute,
 		},
 	}
+	log.Warnf("[%s] No new wildcard DNS domain specified. This mutation will use original domain from Ingress Host %s.", m.name, httpProxyFqdn)
+	httpProxyFqdn = m.input.Spec.Rules[0].Host
 	if m.domain != "" {
 		normalizedDomain := m.domain
 		// let's accept the domain starting with "*." or "."
@@ -77,75 +74,40 @@ func (m *Mutator) buildHTTPProxy() contourv1.HTTPProxy {
 		} else if m.domain[0:1] == "." {
 			normalizedDomain = m.domain[1:]
 		}
-		ocpRouteSplit := strings.SplitN(m.domain, ".", 2)
-		httpProxyFqdn = ocpRouteSplit[0] + "." + normalizedDomain
-
-	} else {
-		// user did not specify the new wild card DNS
-		httpProxyFqdn = m.input.Spec.Rules[0].Host
-		log.Warnf("[%s] No new wildcard DNS domain specified. This mutation will use original domain from OCP route %s.", m.name, httpProxyFqdn)
-
+		ingressHostSplit := strings.SplitN(m.domain, ".", 2)
+		httpProxyFqdn = ingressHostSplit[0] + "." + normalizedDomain
 	}
-
-	//Assign the FQDN
 	hp.Spec.VirtualHost = &contourv1.VirtualHost{
 		Fqdn: httpProxyFqdn,
 	}
-	//Assign the secret name
 	hp.Spec.VirtualHost.TLS = &contourv1.TLS{}
 	hp.Spec.VirtualHost.TLS.SecretName = m.input.Spec.TLS[0].SecretName
-	//Return the HTTPProxy Object
 	return hp
-
 }
 
-//Loop through the rules section and http paths and create the route object.
-func translateRoutes(inrules []core.IngressRule, log logrus.FieldLogger, httpAnnotations *map[string]string) []contourv1.Route {
+// CreateRoute creates the route object which includes condition and service details
+func (m *Mutator) createRoute(inrules []core.IngressRule, log logrus.FieldLogger, httpAnnotations map[string]string) ([]contourv1.Route, map[string]string) {
 	var routes []contourv1.Route
-	var unsupportedHosts string
-	var annotations = make(map[string]string)
 	var route = contourv1.Route{
 		Conditions: []contourv1.MatchCondition{},
 	}
 	var routeFinal = contourv1.Route{
 		Conditions: []contourv1.MatchCondition{},
 	}
-	for i, inrule := range inrules {
-
-		if i >= 1 {
-
-			unsupportedHosts += inrule.Host + ","
-			log.Warnf("%s", "%s", "Unsupported host", inrule.Host)
-
-		} else {
-
-			annotations[supportedHosts] = inrule.Host
-			log.Infof("%s", "%s", "Supported host", inrule.Host)
-			for _, ipaths := range inrule.HTTP.Paths {
-
-				service, condition := translateService(ipaths.Backend, ipaths.Path)
-				routeFinal.Conditions = append(route.Conditions, condition)
-				routeFinal.Services = append(route.Services, service)
-				routes = append(routes, routeFinal)
-			}
-		}
-
+	log.Infof("%s", "%s", "Supported host", inrules[0].Host)
+	for _, ipaths := range inrules[0].HTTP.Paths {
+		routeFinal.Conditions = append(route.Conditions, contourv1.MatchCondition{Prefix: ipaths.Path})
+		routeFinal.Services = append(route.Services, contourv1.Service{
+			Name: ipaths.Backend.ServiceName,
+			Port: ipaths.Backend.ServicePort.IntValue(),
+		})
+		routes = append(routes, routeFinal)
 	}
-	annotations[unSupportedHosts] = strings.TrimRight(unsupportedHosts, ",")
-	*httpAnnotations = annotations
-	return routes
-}
-
-//create the service , condition object and return
-func translateService(backend core.IngressBackend, prefix string) (contourv1.Service, contourv1.MatchCondition) {
-
-	condition := contourv1.MatchCondition{}
-	condition.Prefix = prefix
-
-	service := contourv1.Service{
-		Name: backend.ServiceName,
-		Port: backend.ServicePort.IntValue(),
+	unsupportedHosts := make([]string, 0)
+	for _, inrule := range inrules[1:] {
+		unsupportedHosts = append(unsupportedHosts, inrule.Host)
 	}
-
-	return service, condition
+	log.Infof("%s", "%s", "Un Supported host", strings.Join(unsupportedHosts, ","))
+	httpAnnotations[m.name+"/"+unSupportedHosts] = strings.Join(unsupportedHosts, ",")
+	return routes, httpAnnotations
 }
