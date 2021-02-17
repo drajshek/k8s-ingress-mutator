@@ -47,7 +47,7 @@ func (m *Mutator) Mutate() *MutatorOutput {
 
 // buildHTTPProxy takes ingress object as an input and returns  Contour HTTPProxy
 func (m *Mutator) buildHTTPProxy() contourv1.HTTPProxy {
-	var httpProxyFqdn string
+
 	var httpAnnotations = make(map[string]string)
 	hpTranslatedRoute, httpAnnotations := m.createRoute(m.input.Spec.Rules, m.log, httpAnnotations)
 	hp := contourv1.HTTPProxy{
@@ -64,25 +64,30 @@ func (m *Mutator) buildHTTPProxy() contourv1.HTTPProxy {
 			Routes: hpTranslatedRoute,
 		},
 	}
+
+	httpProxyFqdn := m.input.Spec.Rules[0].Host
 	log.Warnf("[%s] No new wildcard DNS domain specified. This mutation will use original domain from Ingress Host %s.", m.name, httpProxyFqdn)
-	httpProxyFqdn = m.input.Spec.Rules[0].Host
 	if m.domain != "" {
 		normalizedDomain := m.domain
 		// let's accept the domain starting with "*." or "."
 		if m.domain[0:2] == "*." {
 			normalizedDomain = m.domain[2:]
-		} else if m.domain[0:1] == "." {
+		}
+		if m.domain[0:1] == "." {
 			normalizedDomain = m.domain[1:]
 		}
 		ingressHostSplit := strings.SplitN(m.domain, ".", 2)
 		prefix := strings.SplitN(m.input.Spec.Rules[0].Host, ".", 2)
 		httpProxyFqdn = prefix[0] + ingressHostSplit[0] + "." + normalizedDomain
 	}
+
 	hp.Spec.VirtualHost = &contourv1.VirtualHost{
 		Fqdn: httpProxyFqdn,
 	}
+
 	hp.Spec.VirtualHost.TLS = &contourv1.TLS{}
 	hp.Spec.VirtualHost.TLS.SecretName = m.input.Spec.TLS[0].SecretName
+
 	return hp
 }
 
@@ -95,20 +100,26 @@ func (m *Mutator) createRoute(inrules []core.IngressRule, log logrus.FieldLogger
 	var routeFinal = contourv1.Route{
 		Conditions: []contourv1.MatchCondition{},
 	}
+
 	log.Infof("%s", "%s", "Supported host", inrules[0].Host)
-	for _, ipaths := range inrules[0].HTTP.Paths {
-		routeFinal.Conditions = append(route.Conditions, contourv1.MatchCondition{Prefix: ipaths.Path})
+	for _, path := range inrules[0].HTTP.Paths {
+		routeFinal.Conditions = append(route.Conditions, contourv1.MatchCondition{Prefix: path.Path})
 		routeFinal.Services = append(route.Services, contourv1.Service{
-			Name: ipaths.Backend.ServiceName,
-			Port: ipaths.Backend.ServicePort.IntValue(),
+			Name: path.Backend.ServiceName,
+			Port: path.Backend.ServicePort.IntValue(),
 		})
 		routes = append(routes, routeFinal)
 	}
-	unsupportedHosts := make([]string, 0)
-	for _, inrule := range inrules[1:] {
-		unsupportedHosts = append(unsupportedHosts, inrule.Host)
+
+	// Check if multiple rules present in Ingress object
+	if len(inrules) > 1 {
+		unsupportedHosts := make([]string, 0)
+		for _, inrule := range inrules[1:] {
+			unsupportedHosts = append(unsupportedHosts, inrule.Host)
+		}
+		log.Infof("%s", "%s", "unSupportedHost", strings.Join(unsupportedHosts, ","))
+		httpAnnotations[m.name+"/"+unSupportedHosts] = strings.Join(unsupportedHosts, ",")
 	}
-	log.Infof("%s", "%s", "Un Supported host", strings.Join(unsupportedHosts, ","))
-	httpAnnotations[m.name+"/"+unSupportedHosts] = strings.Join(unsupportedHosts, ",")
+
 	return routes, httpAnnotations
 }
