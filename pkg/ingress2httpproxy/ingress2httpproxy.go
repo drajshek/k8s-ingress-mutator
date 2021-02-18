@@ -113,7 +113,7 @@ func (m *Mutator) createRoute(inrules []core.IngressRule, log logrus.FieldLogger
 
 	// Check if multiple rules present in Ingress object
 	if len(inrules) > 1 {
-		unsupportedHosts := make([]string, 0)
+		unsupportedHosts := make([]string, 0, len(inrules)-1)
 		for _, inrule := range inrules[1:] {
 			unsupportedHosts = append(unsupportedHosts, inrule.Host)
 		}
