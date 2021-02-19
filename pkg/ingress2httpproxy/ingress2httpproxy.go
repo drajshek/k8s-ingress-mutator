@@ -93,22 +93,17 @@ func (m *Mutator) buildHTTPProxy() contourv1.HTTPProxy {
 
 // createRoute creates the route object which includes condition and service details
 func (m *Mutator) createRoute(inrules []core.IngressRule, log logrus.FieldLogger, httpAnnotations map[string]string) ([]contourv1.Route, map[string]string) {
-	var routes []contourv1.Route
-	var route = contourv1.Route{
-		Conditions: []contourv1.MatchCondition{},
-	}
-	var routeFinal = contourv1.Route{
-		Conditions: []contourv1.MatchCondition{},
-	}
-
-	log.Infof("%s", "%s", "Supported host", inrules[0].Host)
-	for _, path := range inrules[0].HTTP.Paths {
-		routeFinal.Conditions = append(route.Conditions, contourv1.MatchCondition{Prefix: path.Path})
-		routeFinal.Services = append(route.Services, contourv1.Service{
-			Name: path.Backend.ServiceName,
-			Port: path.Backend.ServicePort.IntValue(),
-		})
-		routes = append(routes, routeFinal)
+	routes := make([]contourv1.Route, len(inrules[0].HTTP.Paths))
+	for i, path := range inrules[0].HTTP.Paths {
+		routes[i].Conditions = []contourv1.MatchCondition{
+			{Prefix: path.Path},
+		}
+		routes[i].Services = []contourv1.Service{
+			{
+				Name: path.Backend.ServiceName,
+				Port: path.Backend.ServicePort.IntValue(),
+			},
+		}
 	}
 
 	// Check if multiple rules present in Ingress object
